@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Control Rocket</title>
+    <style>
+        :root {
+            --primary-blue: #1a73e8;
+            --dark-blue: #0d47a1;
+            --light-blue: #e8f0fe;
+            --accent-blue: #4285f4;
+            --text-dark: #202124;
+            --text-light: #f8f9fa;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f5f5f5;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            color: var(--text-dark);
+        }
+        
+        .container {
+            background-color: white;
+            border-radius: 16px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+            width: 90%;
+            max-width: 500px;
+            padding: 2rem;
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+        
+        h1 {
+            color: var(--dark-blue);
+            margin-bottom: 1.5rem;
+            font-weight: 600;
+        }
+        
+        .status {
+            margin: 1.5rem 0;
+            padding: 1rem;
+            border-radius: 8px;
+            background-color: var(--light-blue);
+            font-weight: 500;
+        }
+        
+        .device-info {
+            margin: 1rem 0;
+            padding: 0.8rem;
+            background-color: #f1f3f4;
+            border-radius: 8px;
+            font-size: 0.9rem;
+        }
+        
+        .control-btn {
+            background-color: var(--primary-blue);
+            color: white;
+            border: none;
+            padding: 1rem 2rem;
+            font-size: 1.1rem;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-weight: 500;
+            box-shadow: 0 4px 12px rgba(26, 115, 232, 0.3);
+            margin: 1rem 0;
+            width: 100%;
+            max-width: 300px;
+            outline: none;
+        }
+        
+        .control-btn:hover {
+            background-color: var(--dark-blue);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(13, 71, 161, 0.3);
+        }
+        
+        .control-btn:active {
+            transform: translateY(0);
+        }
+        
+        .control-btn.off {
+            background-color: #5f6368;
+        }
+        
+        .control-btn.off:hover {
+            background-color: #3c4043;
+        }
+        
+        .connection-status {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 1.5rem;
+        }
+        
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+            background-color: #ddd;
+        }
+        
+        .status-indicator.connected {
+            background-color: #34a853;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); }
+        }
+        
+        .loading {
+            display: none;
+            margin: 1rem 0;
+        }
+        
+        .loading-spinner {
+            border: 3px solid var(--light-blue);
+            border-top: 3px solid var(--primary-blue);
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        footer {
+            margin-top: 2rem;
+            font-size: 0.8rem;
+            color: #5f6368;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Control Rocket</h1>
+        
+        <div class="connection-status">
+            <div class="status-indicator" id="connectionIndicator"></div>
+            <span id="connectionText">Desconectado</span>
+        </div>
+        
+        <div class="device-info">
+            Dispositivo: Rocket Main
+        </div>
+        
+        <div class="status" id="stateDisplay">
+            Estado actual: Apagado
+        </div>
+        
+        <div class="loading" id="loadingIndicator">
+            <div class="loading-spinner"></div>
+            <p>Procesando...</p>
+        </div>
+        
+        <button class="control-btn" id="controlButton" disabled>
+            Conectar Bluetooth
+        </button>
+        
+        <footer>
+            Sistema de control remoto
+        </footer>
+    </div>
+
+    <script>
+        // UUIDs del servicio y característica (deben coincidir con el ESP32)
+        const SERVICE_UUID = '0000ffe0-0000-1000-8000-00805f9b34fb';
+        const CHARACTERISTIC_UUID = '0000ffe1-0000-1000-8000-00805f9b34fb';
+        
+        // Variables de estado
+        let isConnected = false;
+        let deviceState = false; // false = apagado, true = encendido
+        let bluetoothDevice = null;
+        let characteristic = null;
+        
+        // Elementos del DOM
+        const controlButton = document.getElementById('controlButton');
+        const connectionIndicator = document.getElementById('connectionIndicator');
+        const connectionText = document.getElementById('connectionText');
+        const stateDisplay = document.getElementById('stateDisplay');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+        
+        // Inicialización
+        document.addEventListener('DOMContentLoaded', () => {
+            checkBluetoothAvailability();
+        });
+        
+        // Verificar disponibilidad de Bluetooth
+        function checkBluetoothAvailability() {
+            if (!navigator.bluetooth) {
+                alert('Bluetooth no está soportado en este navegador. Prueba con Chrome o Edge.');
+                return;
+            }
+            
+            controlButton.textContent = 'Conectar Bluetooth';
+            controlButton.disabled = false;
+        }
+        
+        // Conectar/Desconectar Bluetooth
+        async function toggleBluetoothConnection() {
+            if (!isConnected) {
+                await connectBluetooth();
+            } else {
+                disconnectBluetooth();
+            }
+        }
+        
+        // Conectar al dispositivo Bluetooth
+        async function connectBluetooth() {
+            try {
+                showLoading(true);
+                controlButton.disabled = true;
+                
+                // Solicitar dispositivo Bluetooth
+                bluetoothDevice = await navigator.bluetooth.requestDevice({
+                    acceptAllDevices: false,
+                    filters: [{ name: 'ESP32_BLE_Control' }], // Nombre exacto del ESP32
+                    optionalServices: [SERVICE_UUID]
+                });
+                
+                // Conectar al servidor GATT
+                const server = await bluetoothDevice.gatt.connect();
+                
+                // Obtener el servicio
+                const service = await server.getPrimaryService(SERVICE_UUID);
+                
+                // Obtener la característica
+                characteristic = await service.getCharacteristic(CHARACTERISTIC_UUID);
+                
+                // Configurar eventos
+                bluetoothDevice.addEventListener('gattserverdisconnected', onDisconnected);
+                
+                // Actualizar UI
+                isConnected = true;
+                updateConnectionStatus();
+                controlButton.textContent = 'Toggle Estado';
+                controlButton.classList.remove('off');
+                controlButton.disabled = false;
+                
+                showLoading(false);
+                
+                console.log('Conectado al ESP32');
+            } catch (error) {
+                console.error('Error al conectar:', error);
+                showLoading(false);
+                controlButton.disabled = false;
+                alert('Error al conectar: ' + error.message);
+            }
+        }
+        
+        // Desconectar Bluetooth
+        function disconnectBluetooth() {
+            if (bluetoothDevice && bluetoothDevice.gatt.connected) {
+                bluetoothDevice.gatt.disconnect();
+            }
+            onDisconnected();
+        }
+        
+        // Manejar desconexión
+        function onDisconnected() {
+            isConnected = false;
+            deviceState = false;
+            bluetoothDevice = null;
+            characteristic = null;
+            
+            updateConnectionStatus();
+            controlButton.textContent = 'Conectar Bluetooth';
+            controlButton.classList.add('off');
+            stateDisplay.textContent = 'Estado actual: Apagado';
+            
+            console.log('Desconectado del ESP32');
+        }
+        
+        // Enviar comando al ESP32
+        async function sendCommand() {
+            if (!isConnected || !characteristic) return;
+            
+            try {
+                showLoading(true);
+                deviceState = !deviceState;
+                
+                // Crear buffer con el comando (1 para encender, 0 para apagar)
+                const value = new Uint8Array([deviceState ? 1 : 0]);
+                await characteristic.writeValue(value);
+                
+                stateDisplay.textContent = `Estado actual: ${deviceState ? 'Encendido' : 'Apagado'}`;
+                controlButton.classList.toggle('off', !deviceState);
+                
+                console.log(`Comando enviado: ${deviceState ? 'ON' : 'OFF'}`);
+                showLoading(false);
+            } catch (error) {
+                console.error('Error al enviar comando:', error);
+                showLoading(false);
+                alert('Error al enviar comando: ' + error.message);
+            }
+        }
+        
+        // Actualizar estado de conexión en la UI
+        function updateConnectionStatus() {
+            if (isConnected) {
+                connectionIndicator.classList.add('connected');
+                connectionText.textContent = 'Conectado';
+            } else {
+                connectionIndicator.classList.remove('connected');
+                connectionText.textContent = 'Desconectado';
+            }
+        }
+        
+        // Mostrar/ocultar indicador de carga
+        function showLoading(show) {
+            loadingIndicator.style.display = show ? 'block' : 'none';
+        }
+        
+        // Controlador del botón
+        controlButton.addEventListener('click', function() {
+            if (isConnected) {
+                sendCommand();
+            } else {
+                toggleBluetoothConnection();
+            }
+        });
+    </script>
+</body>
+</html>
